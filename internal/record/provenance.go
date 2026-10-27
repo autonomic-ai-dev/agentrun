@@ -19,6 +19,7 @@ type Provenance struct {
 	Mode         mode.Mode `json:"mode"`
 	Host         string    `json:"host"`
 	PolicyDigest string    `json:"policy_digest"`
+	PlanDigest   string    `json:"plan_digest,omitempty"`
 }
 
 func NewProvenance(m mode.Mode, host, policyDigest string) (Provenance, error) {
@@ -34,6 +35,22 @@ func NewProvenance(m mode.Mode, host, policyDigest string) (Provenance, error) {
 	return Provenance{Mode: m, Host: host, PolicyDigest: policyDigest}, nil
 }
 
+func (p Provenance) WithPlanDigest(planDigest string) (Provenance, error) {
+	if planDigest == "" {
+		p.PlanDigest = ""
+		return p, nil
+	}
+	normalized := planDigest
+	if !strings.HasPrefix(normalized, digestPrefix) {
+		normalized = digestPrefix + normalized
+	}
+	if !validDigest(normalized) {
+		return Provenance{}, errors.New("provenance plan digest must be sha256 followed by 64 lowercase hex characters")
+	}
+	p.PlanDigest = normalized
+	return p, nil
+}
+
 func (p *Provenance) UnmarshalJSON(data []byte) error {
 	type plain Provenance
 	var raw plain
@@ -43,6 +60,12 @@ func (p *Provenance) UnmarshalJSON(data []byte) error {
 	validated, err := NewProvenance(raw.Mode, raw.Host, raw.PolicyDigest)
 	if err != nil {
 		return err
+	}
+	if raw.PlanDigest != "" {
+		validated, err = validated.WithPlanDigest(raw.PlanDigest)
+		if err != nil {
+			return err
+		}
 	}
 	*p = validated
 	return nil

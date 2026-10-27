@@ -141,3 +141,36 @@ func TestProvenanceJSONExposesModeHostAndPolicyDigest(t *testing.T) {
 		t.Errorf("json has %d fields, want %d: %s", len(fields), len(want), raw)
 	}
 }
+
+func TestProvenanceWithPlanDigest(t *testing.T) {
+	digest := policy.Digest([]byte("network: none"))
+	p, err := record.NewProvenance(mode.Lite, "local", digest)
+	if err != nil {
+		t.Fatalf("NewProvenance returned error: %v", err)
+	}
+
+	validHash := strings.Repeat("f", 64)
+	withPlan, err := p.WithPlanDigest(validHash)
+	if err != nil {
+		t.Fatalf("WithPlanDigest failed: %v", err)
+	}
+	if withPlan.PlanDigest != "sha256:"+validHash {
+		t.Errorf("PlanDigest = %q, want 'sha256:%s'", withPlan.PlanDigest, validHash)
+	}
+
+	raw, err := json.Marshal(withPlan)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+	var unmarshaled record.Provenance
+	if err := json.Unmarshal(raw, &unmarshaled); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	if unmarshaled.PlanDigest != withPlan.PlanDigest {
+		t.Errorf("Roundtrip PlanDigest = %q, want %q", unmarshaled.PlanDigest, withPlan.PlanDigest)
+	}
+
+	if _, err := p.WithPlanDigest("invalid-short-hash"); err == nil {
+		t.Error("expected error for invalid plan digest, got nil")
+	}
+}

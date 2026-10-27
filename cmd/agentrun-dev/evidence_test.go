@@ -80,6 +80,57 @@ func TestEvidenceMalformedOutcomeReturnsError(t *testing.T) {
 	}
 }
 
+func TestEvidenceWithProjectXReceipt(t *testing.T) {
+	dir := t.TempDir()
+	saveOutcome(t, dir, verify.Outcome{
+		Status: verify.Passed,
+		Attempts: []verify.Attempt{
+			{Number: 1, Results: []verify.Result{
+				{Name: "unit", Passed: true},
+			}},
+		},
+	})
+
+	receiptJSON := `{
+  "planId": "integration-plan",
+  "schemaVersion": "x.dev/v1alpha1",
+  "planDigest": "2e291eee7f8d565316bec0b0ad815aa9e4e95b8521d1bba42c10288b4778be6a",
+  "executionId": "exec-abc-123",
+  "timestamps": {
+    "startedAt": "2026-10-27T10:00:00Z",
+    "completedAt": "2026-10-27T10:00:01Z",
+    "durationMs": 42
+  },
+  "status": "complete",
+  "steps": {
+    "stepA": {
+      "tool": "git.diff",
+      "status": "complete",
+      "durationMs": 12,
+      "attempts": 1,
+      "verification": "verified"
+    }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(dir, "receipt.json"), []byte(receiptJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"evidence", dir}, &stdout, &stderr, commands)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("run() = %d, stderr %q", code, stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "project-x receipt: integration-plan (status: complete, duration: 42ms)") {
+		t.Errorf("stdout missing receipt summary: %s", out)
+	}
+	if !strings.Contains(out, "step stepA: complete (tool: git.diff, duration: 12ms, verified: verified)") {
+		t.Errorf("stdout missing step summary: %s", out)
+	}
+}
+
 func TestEvidenceWithoutDirectoryPrintsFourLineError(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
