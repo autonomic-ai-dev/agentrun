@@ -26,6 +26,11 @@ Integration of the Project X declarative execution protocol (pre-execution AST p
 - **Behavior**: Reads `receipt.json` alongside `outcome.json` in task directories and renders step-by-step verification outcomes.
 - **Outcome**: Unified end-to-end evidence reporting.
 
+### `projectx-container-mcp-tooling`
+- **Intent**: Expose Project X as a macro execution engine to in-container coding agents (`agy`, `Cursor`, `Claude`).
+- **Behavior**: Pre-configures agent MCP configurations (`mcp.json`) in sandbox images to discover `project-x mcp` over stdio with `execute_plan`, `validate_plan`, and `inspect_receipt`.
+- **Outcome**: Deterministic multi-step execution inside container without iterative host model round-trips.
+
 ---
 
 ## How to get to it (user POV)

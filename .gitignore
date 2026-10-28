@@ -2,3 +2,5 @@
 coverage.out
 bin/
 images/egress/agentrun-egress
+images/agent-debian/project-x
+
