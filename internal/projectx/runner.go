@@ -3,6 +3,7 @@ package projectx
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"agentrun/internal/errors"
@@ -24,6 +26,8 @@ var (
 
 type Runner struct {
 	binPath string
+	mu      sync.RWMutex
+	cache   map[string]*ValidationResult
 }
 
 func NewRunner(binPath string) *Runner {
@@ -34,7 +38,10 @@ func NewRunner(binPath string) *Runner {
 			binPath = "project-x"
 		}
 	}
-	return &Runner{binPath: binPath}
+	return &Runner{
+		binPath: binPath,
+		cache:   make(map[string]*ValidationResult),
+	}
 }
 
 func (r *Runner) BinPath() string {
@@ -42,7 +49,8 @@ func (r *Runner) BinPath() string {
 }
 
 func (r *Runner) ValidatePlan(ctx context.Context, planPath string) (*ValidationResult, error) {
-	if _, err := os.Stat(planPath); err != nil {
+	data, err := os.ReadFile(planPath)
+	if err != nil {
 		return nil, errors.New(
 			fmt.Sprintf("plan file not found %q", filepath.Base(planPath)),
 			err.Error(),
@@ -51,6 +59,74 @@ func (r *Runner) ValidatePlan(ctx context.Context, planPath string) (*Validation
 		)
 	}
 
+	digest := fmt.Sprintf("%x", sha256.Sum256(data))
+
+	r.mu.RLock()
+	if cached, ok := r.cache[digest]; ok {
+		r.mu.RUnlock()
+		cp := *cached
+		return &cp, nil
+	}
+	r.mu.RUnlock()
+
+	res, err := r.runValidate(ctx, planPath)
+	if err != nil {
+		return nil, err
+	}
+
+	r.mu.Lock()
+	r.cache[digest] = res
+	r.mu.Unlock()
+
+	return res, nil
+}
+
+func (r *Runner) ValidatePlanBytes(ctx context.Context, planContent []byte) (*ValidationResult, error) {
+	digest := fmt.Sprintf("%x", sha256.Sum256(planContent))
+
+	r.mu.RLock()
+	if cached, ok := r.cache[digest]; ok {
+		r.mu.RUnlock()
+		cp := *cached
+		return &cp, nil
+	}
+	r.mu.RUnlock()
+
+	tmp, err := os.CreateTemp("", "agentrun-plan-*.yaml")
+	if err != nil {
+		return nil, errors.New(
+			"failed to create temporary plan file",
+			err.Error(),
+			"ensure the system temporary directory is writable",
+			"https://agentrun.dev/docs/troubleshooting#project-x-plan",
+		)
+	}
+	defer os.Remove(tmp.Name())
+
+	if _, err := tmp.Write(planContent); err != nil {
+		_ = tmp.Close()
+		return nil, errors.New(
+			"failed to write temporary plan file",
+			err.Error(),
+			"check disk space and permissions in temp dir",
+			"https://agentrun.dev/docs/troubleshooting#project-x-plan",
+		)
+	}
+	_ = tmp.Close()
+
+	res, err := r.runValidate(ctx, tmp.Name())
+	if err != nil {
+		return nil, err
+	}
+
+	r.mu.Lock()
+	r.cache[digest] = res
+	r.mu.Unlock()
+
+	return res, nil
+}
+
+func (r *Runner) runValidate(ctx context.Context, planPath string) (*ValidationResult, error) {
 	cmd := exec.CommandContext(ctx, r.binPath, "validate", planPath)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

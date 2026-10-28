@@ -249,3 +249,52 @@ func TestValidationResultSerialization(t *testing.T) {
 		t.Errorf("Serialization roundtrip failed: %+v", unmarshaled)
 	}
 }
+
+func TestValidatePlanCaching(t *testing.T) {
+	bin := findProjectXBin(t)
+	fixtures := findFixturesDir(t)
+	planPath := filepath.Join(fixtures, "valid-multi-step.yaml")
+
+	runner := projectx.NewRunner(bin)
+	ctx := context.Background()
+
+	res1, err := runner.ValidatePlan(ctx, planPath)
+	if err != nil {
+		t.Fatalf("first validation failed: %v", err)
+	}
+
+	start := time.Now()
+	res2, err := runner.ValidatePlan(ctx, planPath)
+	cachedDuration := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("second validation failed: %v", err)
+	}
+	if res1.Digest != res2.Digest || res1.PlanName != res2.PlanName {
+		t.Errorf("cached result mismatch: %+v vs %+v", res1, res2)
+	}
+	if cachedDuration > 10*time.Millisecond {
+		t.Errorf("expected cached validation in < 10ms, took %v", cachedDuration)
+	}
+}
+
+func TestValidatePlanBytes(t *testing.T) {
+	bin := findProjectXBin(t)
+	fixtures := findFixturesDir(t)
+	planPath := filepath.Join(fixtures, "valid-multi-step.yaml")
+	data, err := os.ReadFile(planPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runner := projectx.NewRunner(bin)
+	ctx := context.Background()
+
+	res, err := runner.ValidatePlanBytes(ctx, data)
+	if err != nil {
+		t.Fatalf("ValidatePlanBytes failed: %v", err)
+	}
+	if res.PlanName != "valid-multi-step" || res.StepsCount != 2 {
+		t.Errorf("unexpected ValidatePlanBytes result: %+v", res)
+	}
+}
