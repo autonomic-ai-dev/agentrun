@@ -13,6 +13,7 @@ import (
 
 var (
 	ErrMissingSidecarName  = errors.New("sidecar container name is required")
+	ErrMissingSidecarImage = errors.New("sidecar image is required")
 	ErrEmptyAllowList      = errors.New("sidecar allow list cannot be empty")
 	ErrInternalIPNotFound  = errors.New("internal network IP address (192.168.128.x) not found")
 	ErrSidecarStartTimeout = errors.New("timed out waiting for sidecar to start")
@@ -62,7 +63,7 @@ func StartSidecar(ctx context.Context, cfg SidecarConfig) (*Sidecar, error) {
 	}
 	image := cfg.Image
 	if image == "" {
-		image = "agentrun-egress:latest"
+		return nil, ErrMissingSidecarImage
 	}
 	defNet := cfg.DefaultNetwork
 	if defNet == "" {

@@ -78,6 +78,14 @@ func TestStartSidecarValidation(t *testing.T) {
 	if !errors.Is(err, egress.ErrEmptyAllowList) {
 		t.Errorf("expected ErrEmptyAllowList, got %v", err)
 	}
+
+	_, err = egress.StartSidecar(ctx, egress.SidecarConfig{
+		Name:  "sidecar-1",
+		Allow: []string{"example.com:443"},
+	})
+	if !errors.Is(err, egress.ErrMissingSidecarImage) {
+		t.Errorf("expected ErrMissingSidecarImage, got %v", err)
+	}
 }
 
 func TestStartAndStopSidecarWithFakeBinary(t *testing.T) {
@@ -112,6 +120,7 @@ esac
 	cfg := egress.SidecarConfig{
 		Binary: fakeScript,
 		Name:   "test-sidecar",
+		Image:  "agentrun-egress:0.1.0-test",
 		Allow:  []string{"api.github.com:443"},
 		Port:   3128,
 	}
