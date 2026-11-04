@@ -145,3 +145,166 @@ func TestCreateRunRejectsNonGitDirectory(t *testing.T) {
 		t.Errorf("CreateRun() error = %v, want ErrNotGitRepo", err)
 	}
 }
+
+func TestDefaultDataDirUsesHomeWhenUnset(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTRUN_DATA", "")
+	t.Setenv("HOME", home)
+	if got, want := engine.DefaultDataDir(), filepath.Join(home, ".local", "share", "agentrun"); got != want {
+		t.Errorf("DefaultDataDir() = %q, want %q", got, want)
+	}
+}
+
+func TestDefaultDataDirFallsBackToTempWithoutHome(t *testing.T) {
+	t.Setenv("AGENTRUN_DATA", "")
+	t.Setenv("HOME", "")
+	if got, want := engine.DefaultDataDir(), filepath.Join(os.TempDir(), "agentrun"); got != want {
+		t.Errorf("DefaultDataDir() = %q, want %q", got, want)
+	}
+}
+
+func TestSetStatusFailsForMissingRunDir(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	if err := engine.SetStatus(missing, engine.StatusRunning); err == nil {
+		t.Fatal("SetStatus() on a missing run directory returned no error")
+	}
+}
+
+func TestGetStatusFailsWithoutStatusFile(t *testing.T) {
+	_, err := engine.GetStatus(t.TempDir())
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("GetStatus() error = %v, want os.ErrNotExist", err)
+	}
+}
+
+func TestCreateRunUsesDefaultDataDirWhenUnset(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("AGENTRUN_DATA", dataDir)
+
+	run, err := engine.CreateRun(engine.SubmitConfig{Prompt: "task", Repo: initGitRepo(t)})
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+	if want := filepath.Join(dataDir, "runs", run.ID); run.Dir != want {
+		t.Errorf("run.Dir = %q, want %q", run.Dir, want)
+	}
+}
+
+func TestCreateRunUsesWorkingDirectoryWhenRepoUnset(t *testing.T) {
+	repoDir := initGitRepo(t)
+	t.Chdir(repoDir)
+	dataDir := t.TempDir()
+
+	run, err := engine.CreateRun(engine.SubmitConfig{Prompt: "task", DataDir: dataDir})
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+	if want := filepath.Join(dataDir, "runs", run.ID); run.Dir != want {
+		t.Errorf("run.Dir = %q, want %q", run.Dir, want)
+	}
+	if run.Base == "" {
+		t.Error("run.Base is empty; the working directory repository was not used")
+	}
+}
+
+func TestCreateRunFailsWhenDataDirIsFile(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := engine.CreateRun(engine.SubmitConfig{Prompt: "task", Repo: initGitRepo(t), DataDir: blocker})
+	if err == nil {
+		t.Fatal("CreateRun() with a file as data directory returned no error")
+	}
+}
+
+func TestGetRunFailsForCorruptStatus(t *testing.T) {
+	repoDir := initGitRepo(t)
+	dataDir := t.TempDir()
+	run, err := engine.CreateRun(engine.SubmitConfig{Prompt: "task", Repo: repoDir, DataDir: dataDir})
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(run.Dir, "status"), []byte("bogus\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = engine.GetRun(dataDir, run.ID)
+	if !errors.Is(err, engine.ErrCorruptStatusFile) {
+		t.Errorf("GetRun() error = %v, want ErrCorruptStatusFile", err)
+	}
+}
+
+func TestGetRunFailsWithoutTaskOrBaseFile(t *testing.T) {
+	for _, name := range []string{"task.md", "base"} {
+		t.Run(name, func(t *testing.T) {
+			repoDir := initGitRepo(t)
+			dataDir := t.TempDir()
+			run, err := engine.CreateRun(engine.SubmitConfig{Prompt: "task", Repo: repoDir, DataDir: dataDir})
+			if err != nil {
+				t.Fatalf("CreateRun failed: %v", err)
+			}
+			if err := os.Remove(filepath.Join(run.Dir, name)); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := engine.GetRun(dataDir, run.ID); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("GetRun() error = %v, want os.ErrNotExist", err)
+			}
+		})
+	}
+}
+
+func TestListRunsReturnsRunsSortedByID(t *testing.T) {
+	repoDir := initGitRepo(t)
+	dataDir := t.TempDir()
+
+	for i := 0; i < 2; i++ {
+		if _, err := engine.CreateRun(engine.SubmitConfig{Prompt: "task", Repo: repoDir, DataDir: dataDir}); err != nil {
+			t.Fatalf("CreateRun failed: %v", err)
+		}
+	}
+
+	runs, err := engine.ListRuns(dataDir)
+	if err != nil {
+		t.Fatalf("ListRuns failed: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("ListRuns returned %d runs, want 2", len(runs))
+	}
+	if runs[0].ID >= runs[1].ID {
+		t.Errorf("ListRuns order = [%s %s], want ascending IDs", runs[0].ID, runs[1].ID)
+	}
+}
+
+func TestListRunsSkipsValidIDDirectoryWithoutStatus(t *testing.T) {
+	repoDir := initGitRepo(t)
+	dataDir := t.TempDir()
+	created, err := engine.CreateRun(engine.SubmitConfig{Prompt: "task", Repo: repoDir, DataDir: dataDir})
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(engine.RunsDir(dataDir), "a1b2c3"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	runs, err := engine.ListRuns(dataDir)
+	if err != nil {
+		t.Fatalf("ListRuns failed: %v", err)
+	}
+	if len(runs) != 1 || runs[0].ID != created.ID {
+		t.Errorf("ListRuns = %+v, want only run %s", runs, created.ID)
+	}
+}
+
+func TestListRunsFailsWhenRunsPathIsFile(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := os.WriteFile(engine.RunsDir(dataDir), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := engine.ListRuns(dataDir); err == nil {
+		t.Fatal("ListRuns() with a file at the runs path returned no error")
+	}
+}
