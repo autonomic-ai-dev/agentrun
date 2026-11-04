@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"agentrun/internal/container"
 	"agentrun/internal/container/apple"
@@ -126,6 +127,78 @@ func TestAgentExitCodeIsRecordedWhileAttached(t *testing.T) {
 	if outcome := readFileOrEmpty(filepath.Join(run.Dir, "outcome.json")); !strings.Contains(outcome, "agent_err") {
 		t.Errorf("outcome.json does not record the agent error:\n%s", outcome)
 	}
+}
+
+func TestCancelStopsRunningContainer(t *testing.T) {
+	repo := newRepoWithCommit(t)
+	dataDir := t.TempDir()
+
+	run, err := engine.CreateRun(engine.SubmitConfig{Prompt: "sleep", Repo: repo, DataDir: dataDir})
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	cancelErr := make(chan error, 1)
+	go func() {
+		nameFile := filepath.Join(run.Dir, "container.name")
+		deadline := time.Now().Add(30 * time.Second)
+		for time.Now().Before(deadline) {
+			name := strings.TrimSpace(readFileOrEmpty(nameFile))
+			if name != "" && containerRunning(name) {
+				cancelErr <- engine.Cancel(dataDir, run.ID)
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		cancelErr <- fmt.Errorf("container never reached running state")
+	}()
+
+	start := time.Now()
+	_ = engine.Execute(t.Context(), run, engine.ExecutionOptions{
+		AgentCmd:    "sleep 120",
+		Checks:      []verify.Check{{Name: "true", Command: "true"}},
+		MaxAttempts: 1,
+		Container:   appleEngineOptions(),
+	})
+	elapsed := time.Since(start)
+
+	if err := <-cancelErr; err != nil {
+		t.Fatalf("Cancel failed: %v", err)
+	}
+	if elapsed > 60*time.Second {
+		t.Errorf("Execute took %s; the cancelled container kept the agent running", elapsed)
+	}
+
+	status, err := engine.GetStatus(run.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != engine.StatusCancelled {
+		t.Errorf("status = %q, want %q", status, engine.StatusCancelled)
+	}
+
+	name := strings.TrimSpace(readFileOrEmpty(filepath.Join(run.Dir, "container.name")))
+	if name == "" {
+		t.Fatal("container.name was not recorded")
+	}
+	if out, err := exec.Command("container", "list", "--all").CombinedOutput(); err != nil {
+		t.Fatalf("container list: %v", err)
+	} else if strings.Contains(string(out), name) {
+		t.Errorf("container %s still exists after cancel:\n%s", name, out)
+	}
+}
+
+func containerRunning(name string) bool {
+	out, err := exec.Command("container", "list", "--all").CombinedOutput()
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.Contains(line, name) && strings.Contains(line, " running ") {
+			return true
+		}
+	}
+	return false
 }
 
 func readFileOrEmpty(path string) string {

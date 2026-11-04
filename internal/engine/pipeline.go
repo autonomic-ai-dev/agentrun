@@ -33,8 +33,13 @@ func agentCommand(opts ExecutionOptions) string {
 }
 
 func Execute(ctx context.Context, run *Run, opts ExecutionOptions) error {
-	if opts.Container != nil && opts.Container.NewBackend == nil {
-		return ErrNoBackend
+	if opts.Container != nil {
+		if opts.Container.NewBackend == nil {
+			return ErrNoBackend
+		}
+		if _, err := os.Stat(filepath.Join(run.Worktree, ".verify", "run.sh")); err != nil && len(opts.Checks) == 0 {
+			return ErrNoContainerChecks
+		}
 	}
 
 	currentStatus, err := GetStatus(run.Dir)

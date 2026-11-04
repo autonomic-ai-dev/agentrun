@@ -9,12 +9,18 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"agentrun/internal/container"
 	"agentrun/internal/verify"
 )
 
-var ErrNoBackend = errors.New("container options need a backend")
+var (
+	ErrNoBackend         = errors.New("container options need a backend")
+	ErrNoContainerChecks = errors.New("container runs need explicit checks or a .verify/run.sh in the repository")
+)
+
+const containerNameFile = "container.name"
 
 type ContainerOptions struct {
 	NewBackend func(output io.Writer) container.Backend
@@ -43,6 +49,15 @@ func (co ContainerOptions) spec(run *Run, command string) container.Spec {
 	}
 }
 
+func runContainer(ctx context.Context, run *Run, co ContainerOptions, command string, output io.Writer) (container.Result, error) {
+	spec := co.spec(run, command)
+	spec.Name = fmt.Sprintf("agentrun-%s-%d", run.ID, time.Now().UnixNano())
+	if err := os.WriteFile(filepath.Join(run.Dir, containerNameFile), []byte(spec.Name+"\n"), 0644); err != nil {
+		return container.Result{}, err
+	}
+	return co.NewBackend(output).Run(ctx, spec)
+}
+
 func containerAgent(run *Run, co ContainerOptions, agentCmd string) verify.Agent {
 	return func(ctx context.Context, prompt string) error {
 		promptDir := filepath.Join(run.Dir, "prompt")
@@ -59,7 +74,7 @@ func containerAgent(run *Run, co ContainerOptions, agentCmd string) verify.Agent
 		}
 		defer logFile.Close()
 
-		result, err := co.NewBackend(logFile).Run(ctx, co.spec(run, "cat /agentrun/prompt.txt | "+agentCmd))
+		result, err := runContainer(ctx, run, co, "cat /agentrun/prompt.txt | "+agentCmd, logFile)
 		if err != nil {
 			return err
 		}
@@ -76,7 +91,7 @@ func containerAgent(run *Run, co ContainerOptions, agentCmd string) verify.Agent
 func containerChecks(run *Run, co ContainerOptions) verify.CheckRunner {
 	return func(ctx context.Context, c verify.Check) (verify.Result, error) {
 		var output bytes.Buffer
-		result, err := co.NewBackend(&output).Run(ctx, co.spec(run, c.Command))
+		result, err := runContainer(ctx, run, co, c.Command, &output)
 		if err != nil {
 			return verify.Result{}, fmt.Errorf("run check %q: %w", c.Name, err)
 		}

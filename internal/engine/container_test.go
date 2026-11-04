@@ -70,6 +70,15 @@ func TestExecuteInContainerRecordsAgentExitCodeAndRunsChecksInContainer(t *testi
 		t.Errorf("prompt mount = %+v, want read-only /agentrun", agentSpec.Mounts[1])
 	}
 
+	recordedName, err := os.ReadFile(filepath.Join(run.Dir, "container.name"))
+	if err != nil {
+		t.Fatalf("container.name missing: %v", err)
+	}
+	lastSpec := fake.Specs[len(fake.Specs)-1]
+	if strings.TrimSpace(string(recordedName)) != lastSpec.Name || lastSpec.Name == "" {
+		t.Errorf("container.name = %q, want the name of the last container started, %q", recordedName, lastSpec.Name)
+	}
+
 	prompt, err := os.ReadFile(filepath.Join(run.Dir, "prompt", "prompt.txt"))
 	if err != nil {
 		t.Fatalf("prompt file missing: %v", err)
@@ -138,6 +147,29 @@ func TestExecuteInContainerPropagatesBackendStartFailure(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(run.Dir, "exit_code")); !os.IsNotExist(err) {
 		t.Errorf("exit_code written although the container never started: %v", err)
+	}
+}
+
+func TestExecuteInContainerRequiresChecksWhenRepoHasNoVerifyScript(t *testing.T) {
+	run, _ := createQueuedRun(t)
+	fake := &containertest.Fake{}
+
+	err := engine.Execute(context.Background(), run, engine.ExecutionOptions{
+		AgentCmd:  "true",
+		Container: containerOptions(fake),
+	})
+	if !errors.Is(err, engine.ErrNoContainerChecks) {
+		t.Fatalf("Execute() error = %v, want ErrNoContainerChecks", err)
+	}
+	if len(fake.Specs) != 0 {
+		t.Errorf("container ran %d times before the checks guard", len(fake.Specs))
+	}
+	status, err := engine.GetStatus(run.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != engine.StatusQueued {
+		t.Errorf("status = %q, want %q; the run never started", status, engine.StatusQueued)
 	}
 }
 

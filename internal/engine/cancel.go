@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -25,6 +26,10 @@ func Cancel(dataDir, id string) error {
 
 	if err := SetStatus(run.Dir, StatusCancelled); err != nil {
 		return err
+	}
+
+	if data, err := os.ReadFile(filepath.Join(run.Dir, containerNameFile)); err == nil {
+		_ = exec.Command("container", "stop", strings.TrimSpace(string(data))).Run()
 	}
 
 	pidPath := filepath.Join(run.Dir, "agent.pid")
