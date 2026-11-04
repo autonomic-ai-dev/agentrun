@@ -34,12 +34,15 @@ type Result struct {
 
 type Agent func(ctx context.Context, prompt string) error
 
+type CheckRunner func(ctx context.Context, c Check) (Result, error)
+
 type Config struct {
 	Dir         string
 	Task        string
 	Checks      []Check
 	MaxAttempts int
 	Agent       Agent
+	CheckRunner CheckRunner
 }
 
 type Status string
@@ -62,9 +65,15 @@ type Outcome struct {
 }
 
 func RunChecks(ctx context.Context, dir string, checks []Check) ([]Result, error) {
+	return runChecks(ctx, checks, func(ctx context.Context, c Check) (Result, error) {
+		return runCheck(ctx, dir, c)
+	})
+}
+
+func runChecks(ctx context.Context, checks []Check, run CheckRunner) ([]Result, error) {
 	var results []Result
 	for _, c := range checks {
-		res, err := runCheck(ctx, dir, c)
+		res, err := run(ctx, c)
 		if err != nil {
 			return results, err
 		}
@@ -74,6 +83,10 @@ func RunChecks(ctx context.Context, dir string, checks []Check) ([]Result, error
 		}
 	}
 	return results, nil
+}
+
+func NewResult(name string, exitCode int, output string) Result {
+	return Result{Name: name, Passed: exitCode == 0, ExitCode: exitCode, Output: tail(output)}
 }
 
 func runCheck(ctx context.Context, dir string, c Check) (Result, error) {
@@ -110,7 +123,7 @@ func Loop(ctx context.Context, cfg Config) (Outcome, error) {
 		}
 
 		agentErr := cfg.Agent(ctx, prompt)
-		results, err := RunChecks(ctx, cfg.Dir, cfg.Checks)
+		results, err := runChecks(ctx, cfg.Checks, checkRunner(cfg))
 		if err != nil {
 			return out, err
 		}
@@ -130,6 +143,15 @@ func Loop(ctx context.Context, cfg Config) (Outcome, error) {
 	}
 	out.Status = Exhausted
 	return out, nil
+}
+
+func checkRunner(cfg Config) CheckRunner {
+	if cfg.CheckRunner != nil {
+		return cfg.CheckRunner
+	}
+	return func(ctx context.Context, c Check) (Result, error) {
+		return runCheck(ctx, cfg.Dir, c)
+	}
 }
 
 type outcomeFile struct {

@@ -36,6 +36,12 @@ func RunArgs(spec Spec) ([]string, error) {
 	for _, m := range spec.Mounts {
 		args = append(args, "--mount", mountFlag(m))
 	}
+	if spec.WorkDir != "" {
+		args = append(args, "--workdir", spec.WorkDir)
+	}
+	if spec.Remove {
+		args = append(args, "--rm")
+	}
 	args = append(args, spec.Image)
 	args = append(args, spec.Cmd...)
 	return args, nil

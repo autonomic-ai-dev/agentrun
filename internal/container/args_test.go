@@ -257,6 +257,35 @@ func TestRunArgs(t *testing.T) {
 			},
 			wantErr: container.ErrBadEnv,
 		},
+		{
+			name: "workdir and remove are emitted before the image",
+			mutate: func(s *container.Spec) {
+				s.WorkDir = "/work"
+				s.Remove = true
+			},
+			want: []string{
+				"--user", "1000:1000",
+				"--read-only",
+				"--tmpfs", "/tmp",
+				"--network", "agentrun-internal",
+				"--workdir", "/work",
+				"--rm",
+				"ghcr.io/example/agent:1.2.3",
+				"sh", "-c", "echo hi",
+			},
+		},
+		{
+			name:   "workdir and remove are omitted when unset",
+			mutate: func(s *container.Spec) { s.WorkDir = ""; s.Remove = false },
+			want: []string{
+				"--user", "1000:1000",
+				"--read-only",
+				"--tmpfs", "/tmp",
+				"--network", "agentrun-internal",
+				"ghcr.io/example/agent:1.2.3",
+				"sh", "-c", "echo hi",
+			},
+		},
 	}
 
 	for _, tt := range tests {

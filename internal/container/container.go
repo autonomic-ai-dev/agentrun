@@ -40,6 +40,8 @@ type Spec struct {
 	Labels   map[string]string
 	Memory   string
 	Env      map[string]string
+	WorkDir  string
+	Remove   bool
 	Cmd      []string
 }
 
