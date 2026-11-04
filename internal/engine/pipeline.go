@@ -19,9 +19,24 @@ type ExecutionOptions struct {
 	AgentCmd    string
 	Checks      []verify.Check
 	MaxAttempts int
+	Container   *ContainerOptions
+}
+
+func agentCommand(opts ExecutionOptions) string {
+	if opts.AgentCmd != "" {
+		return opts.AgentCmd
+	}
+	if env := os.Getenv("AGENTRUN_AGENT_CMD"); env != "" {
+		return env
+	}
+	return "claude -p"
 }
 
 func Execute(ctx context.Context, run *Run, opts ExecutionOptions) error {
+	if opts.Container != nil && opts.Container.NewBackend == nil {
+		return ErrNoBackend
+	}
+
 	currentStatus, err := GetStatus(run.Dir)
 	if err != nil {
 		return err
@@ -54,14 +69,15 @@ func Execute(ctx context.Context, run *Run, opts ExecutionOptions) error {
 	}
 
 	agentFn := opts.Agent
+	var checkRunner verify.CheckRunner
+	if opts.Container != nil {
+		checkRunner = containerChecks(run, *opts.Container)
+		if agentFn == nil {
+			agentFn = containerAgent(run, *opts.Container, agentCommand(opts))
+		}
+	}
 	if agentFn == nil {
-		agentCmd := opts.AgentCmd
-		if agentCmd == "" {
-			agentCmd = os.Getenv("AGENTRUN_AGENT_CMD")
-		}
-		if agentCmd == "" {
-			agentCmd = "claude -p"
-		}
+		agentCmd := agentCommand(opts)
 
 		agentFn = func(attemptCtx context.Context, prompt string) error {
 			logPath := filepath.Join(run.Dir, "logs", "agent.log")
@@ -106,6 +122,7 @@ func Execute(ctx context.Context, run *Run, opts ExecutionOptions) error {
 		Checks:      checks,
 		MaxAttempts: maxAttempts,
 		Agent:       agentFn,
+		CheckRunner: checkRunner,
 	})
 
 	statusAfterLoop, _ := GetStatus(run.Dir)
