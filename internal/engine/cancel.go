@@ -29,7 +29,7 @@ func Cancel(dataDir, id string) error {
 	}
 
 	if data, err := os.ReadFile(filepath.Join(run.Dir, containerNameFile)); err == nil {
-		_ = exec.Command("container", "stop", strings.TrimSpace(string(data))).Run()
+		_ = exec.Command(containerCLI, "stop", strings.TrimSpace(string(data))).Run()
 	}
 
 	pidPath := filepath.Join(run.Dir, "agent.pid")
