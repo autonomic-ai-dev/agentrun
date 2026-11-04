@@ -91,6 +91,13 @@ Integration of the Project X declarative execution protocol (pre-execution AST p
 
 ---
 
+## Code
+
+- `internal/projectx/`
+- `internal/record/`
+- `cmd/agentrun-dev/evidence.go`
+- `test/integration/projectx_test.go`
+
 ## Gotchas
 
 - **Executable Resolution**: If `project-x` is not in `$PATH`, `NewRunner` allows explicit binary path injection, with fallback resolution checking `/Volumes/Seagate/developer/personal/autonomic-ai-dev/project-x/target/release/project-x` or standard system paths.
