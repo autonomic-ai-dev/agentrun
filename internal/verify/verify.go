@@ -13,7 +13,10 @@ import (
 
 const outputLimit = 4096
 
-const outcomeFileName = "outcome.json"
+const (
+	outcomeFileName = "outcome.json"
+	agentResultName = "agent"
+)
 
 var (
 	ErrNoChecks        = errors.New("verify: no checks configured")
@@ -123,9 +126,15 @@ func Loop(ctx context.Context, cfg Config) (Outcome, error) {
 		}
 
 		agentErr := cfg.Agent(ctx, prompt)
-		results, err := runChecks(ctx, cfg.Checks, checkRunner(cfg))
-		if err != nil {
-			return out, err
+		var results []Result
+		if agentErr != nil {
+			results = []Result{{Name: agentResultName, ExitCode: 1, Output: agentErr.Error()}}
+		} else {
+			var err error
+			results, err = runChecks(ctx, cfg.Checks, checkRunner(cfg))
+			if err != nil {
+				return out, err
+			}
 		}
 		out.Attempts = append(out.Attempts, Attempt{Number: n, AgentErr: agentErr, Results: results})
 

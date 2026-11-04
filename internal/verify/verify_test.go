@@ -207,8 +207,9 @@ func TestLoopStopsWhenSameFailureRepeats(t *testing.T) {
 	}
 }
 
-func TestLoopRecordsAgentErrorAndStillVerifies(t *testing.T) {
+func TestLoopFailsAttemptWhenAgentExitsWithError(t *testing.T) {
 	agentErr := errors.New("agent exited 1")
+	checkRan := false
 
 	outcome, err := verify.Loop(context.Background(), verify.Config{
 		Dir:         t.TempDir(),
@@ -218,13 +219,20 @@ func TestLoopRecordsAgentErrorAndStillVerifies(t *testing.T) {
 		Agent: func(ctx context.Context, prompt string) error {
 			return agentErr
 		},
+		CheckRunner: func(_ context.Context, c verify.Check) (verify.Result, error) {
+			checkRan = true
+			return verify.Result{Name: c.Name, Passed: true}, nil
+		},
 	})
 	if err != nil {
 		t.Fatalf("Loop() error = %v", err)
 	}
 
-	if outcome.Status != verify.Passed {
-		t.Errorf("Status = %q, want %q: checks decide, not the agent exit", outcome.Status, verify.Passed)
+	if outcome.Status == verify.Passed {
+		t.Errorf("Status = %q: an agent that exits with an error must not pass, even when checks pass", outcome.Status)
+	}
+	if checkRan {
+		t.Error("checks ran after the agent failed; they must not decide a failed attempt")
 	}
 	if !errors.Is(outcome.Attempts[0].AgentErr, agentErr) {
 		t.Errorf("AgentErr = %v, want %v", outcome.Attempts[0].AgentErr, agentErr)
