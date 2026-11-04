@@ -7,13 +7,39 @@ AgentRun runs coding-agent tasks as isolated, recoverable jobs on your own machi
 
 ## Status
 
-**Pre-alpha. The `agentrun` command does not exist yet.** This repository currently contains:
+**Pre-alpha.** This repository contains:
 
 - shared foundations for the mode flag, policy digest, and provenance record (`internal/mode`, `internal/policy`, `internal/record`);
 - the standard error format and catalog (`internal/errors`);
-- an isolation capability suite that runs real containers against Apple's `container` CLI (`test/capability`);
+- the run engine: runs are stored on disk, and each agent attempt and verify check runs in an isolated container (`internal/engine`, `internal/container/apple`);
+- an egress allowlist sidecar that agents reach through their `HTTPS_PROXY` (`internal/egress`, `cmd/agentrun-egress`);
+- `agentrun submit`, which runs one task in the Lite configuration (`cmd/agentrun`);
+- an isolation capability suite that runs real containers against Apple's `container` CLI (`test/capability`).
 
-Nothing here runs a coding agent yet. The engine, run store, container backend, and CLI are not built yet.
+Full mode, a status or result command for the product binary, and parallel runs are not built.
+
+### Submitting a task
+
+Requires Apple's `container` CLI with its service running and a default kernel (`container system kernel set --recommended`).
+
+Build the egress sidecar image from the repository's Dockerfile. Give it an explicit tag; `latest` is refused:
+
+```sh
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o <ctx>/agentrun-egress ./cmd/agentrun-egress
+cp images/egress/Dockerfile <ctx>/
+container build -t agentrun-egress:0.1.0 <ctx>
+```
+
+Then submit:
+
+```sh
+go run ./cmd/agentrun submit \
+  --repo . --agent claude --agent-cmd 'claude -p --permission-mode acceptEdits' \
+  --image <agent-image>@sha256:<digest> --egress-image agentrun-egress:0.1.0 \
+  --check unit='go test ./...' "Fix the flaky auth tests"
+```
+
+The command exits 0 only when the run succeeds, and prints the run ID and branch `agentrun/<id>`. Agents reach only the hosts in their agent allowlist (`internal/agent`).
 
 ## Requirements
 

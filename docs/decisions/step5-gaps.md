@@ -1,27 +1,27 @@
 # Step 5 gaps
 
-Status: working list. Each gap says whether it is fixed, prepared, or waiting for a decision.
+Status: the gaps listed in the earlier version of this note are closed, except where a line below says otherwise.
 
-## Fixed
+## Done
 
-- **Cancel did not stop a container.** Container runs record their name in `container.name` in the run directory. `Cancel` runs `container stop` on that name. Test: `TestCancelStopsRunningContainer` (live).
-- **Default `git status` check does not work inside a container.** The worktree's `.git` file points at a host path. `Execute` now refuses to start a container run that has no explicit checks and no `.verify/run.sh`, with `ErrNoContainerChecks`. Nothing is started and the status stays `queued`. Test: `TestExecuteInContainerRequiresChecksWhenRepoHasNoVerifyScript`.
+- **Cancel did not stop a container.** Container runs record their name in `container.name`. `Cancel` runs `container stop` on it. Test: `TestCancelStopsRunningContainer`.
+- **A cancel during container start was lost.** Each container run has a watcher that retries `container stop` while the run is cancelled, until the run returns. Test: `TestCancelBeforeContainerRunningStopsContainer`.
+- **Container runs without checks.** A container run with no checks and no `.verify/run.sh` fails before it starts, with `ErrNoContainerChecks`. Test: `TestExecuteInContainerRequiresChecksWhenRepoHasNoVerifyScript`.
+- **Exit-code semantics (decision B).** A non-zero agent exit fails the attempt even when the checks pass. The checks do not run for that attempt. The failure is repaired like any failing check. This changes the host path too. Test: `TestLoopFailsAttemptWhenAgentExitsWithError` (this replaces the old test that asserted the checks decide).
+- **Egress sidecar wiring.** `Execute` creates the internal network `agentrun-internal` (192.168.128.0/24, `--internal`) if it is missing, starts the sidecar on the default network and the internal network, gives the agent and its checks only the internal network with `HTTPS_PROXY` set, and stops the sidecar when the run ends. Test: `TestEgressSidecarBlocksDirectAndUnlistedTraffic`. The probe showed direct egress blocked, the proxy reachable, a 403 for an unlisted host, and a 200 tunnel for a listed host.
+- **Sidecar image.** The sidecar no longer defaults to `agentrun-egress:latest`. An image is required, and the README shows building one with an explicit tag.
+- **Submit command.** `cmd/agentrun` provides `submit`. Test: `TestSubmitCommandRunsEndToEnd` runs the built binary against a real repository and checks the patch.
+- **Container service restart during a run.** `container system stop` during a run ends `Execute` in a terminal state, leaves no container behind, and the service comes back with `container system start`. Test: `TestRunEndsWhenContainerServiceRestarts`. This test stops every container service on the machine, so it is not part of a routine run.
 
-## Known limit that is not fixed
+## Not done
 
-- **A cancel during the start window is lost.** The name is written before `container run` starts the container. If `container stop` runs before the container reaches `running`, the stop does nothing, and the agent runs to the end of its work. Reproduced by hand: a stop issued just after the name was written left the attached client waiting. The live test waits for `running` before it cancels, so it does not cover this window. Fix options: (a) poll `container list` in `Cancel` until the container is running or gone, then stop it; (b) have the engine check the run status while waiting on the attached client and stop the container itself. Recommendation: (b), because it does not depend on the timing of the caller.
+- **Host sleep.** Sleep cannot be automated from a test. Manual procedure: start a submit run with an agent that sleeps for two minutes, put the host to sleep for a minute, wake it, then confirm that `container list --all` shows no `agentrun-` container and that the run status is terminal. Record the result here before unattended runs (Step 6).
+- **Real agent prompts.** The agent CLIs (`claude`, `agy`, `cursor`) have not been run with a real prompt inside a container. That needs `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or `CURSOR_API_KEY`. The engine assumes each CLI reads its prompt from stdin, which is unverified for these CLIs.
+- **Engine coverage.** Unit-test statement coverage of `internal/engine` is 86.1%, below the 90% target. The gap is in the egress wiring (`behindProxy`, `startEgress`), which only the live tests reach, and in error branches of the container path.
+- **Parallel runs.** Step 6. Not started.
+- **Shared network.** All runs share `agentrun-internal` and its subnet. Two concurrent runs each get their own sidecar, but they share one network. Not tested with concurrent runs.
 
-## Prepared, not built
+## Notes for the operator
 
-- **Submit command.** The Go engine has no CLI. `prototype/agentrun-proto submit` is still the only submit path. Proposed: `agentrun submit "<task>" --repo PATH [--include-dirty] --image REF --network NAME`, calling `CreateRun` then `Execute` with a `ContainerOptions` built from the flags. It is blocked on the egress decision below, because a submit that runs agents needs a network choice.
-- **Egress sidecar launcher.** `internal/egress` and `cmd/agentrun-egress` exist, but nothing starts them for a run. The decision in `docs/decisions/apple-container-backend.md` needs: an internal network for agents, a dual-homed sidecar container from `images/egress`, the sidecar's internal address read from `container inspect`, and `HTTPS_PROXY` set in `ContainerOptions`. `Spec.Networks` already supports attaching one container to two networks. Not built yet.
-- **Default network is a risk.** `ContainerOptions.Network` is required, but `"default"` gives an agent full outbound access. Until the sidecar launcher exists, do not run untrusted agents with `"default"`.
-- **Host sleep and service restart test.** No test in `test/capability/` covers either. A test cannot put the host to sleep. Proposed: a manual procedure (suspend the host during a run, then check that `container stop` on the run's `container.name` leaves no container and that the run's status is consistent), plus a capability test that restarts the container service during a run (`container system stop` then `container system start`) and checks that the run ends with a recorded status and no orphan container. Both are needed before unattended runs (Step 6).
-
-## Decision needed
-
-- **Exit code and checks.** Today a non-zero agent exit does not fail a run if the checks pass. The exit code is recorded and the agent error is kept in `outcome.json`. Options:
-  - A. Keep it: checks decide the outcome. Simple, matches the host path.
-  - B. Fail the run on any non-zero agent exit, even when checks pass. Safer: an agent that crashes midway cannot produce a successful run.
-
-  Recommendation: B. It changes the host path too, so it needs its own test update. Not changed yet.
+- `agentrun-internal` is created on the machine and is not removed by any test or command.
+- The capability suite now includes tests that stop the container service, and tests that build and run the egress image. Each takes a few seconds to a few minutes.
