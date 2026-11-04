@@ -339,3 +339,43 @@ func TestSIGTERMHonoringProcessExitsPromptly(t *testing.T) {
 		t.Errorf("stop took %s for a process that honors SIGTERM", elapsed)
 	}
 }
+
+func TestLivePromptAgyThroughEgressProxy(t *testing.T) {
+	key := os.Getenv("GEMINI_API_KEY")
+	if key == "" {
+		t.Skip("GEMINI_API_KEY is not set; skipping live agy capability test")
+	}
+
+	name := newName(t)
+	got := cli(t, "run", "--name", name, "--rm",
+		"-e", "GEMINI_API_KEY="+key,
+		"agent-debian:latest",
+		"agy", "-p", "Respond only with PONG to this ping.", "--dangerously-skip-permissions")
+
+	if got.exit != 0 {
+		t.Fatalf("agy prompt exited %d:\n%s\n%s", got.exit, got.stdout, got.stderr)
+	}
+	if !strings.Contains(got.stdout, "PONG") {
+		t.Errorf("agy output does not contain PONG:\n%s", got.stdout)
+	}
+}
+
+func TestLivePromptCursorThroughEgressProxy(t *testing.T) {
+	key := os.Getenv("CURSOR_API_KEY")
+	if key == "" {
+		t.Skip("CURSOR_API_KEY is not set; skipping live cursor capability test")
+	}
+
+	name := newName(t)
+	got := cli(t, "run", "--name", name, "--rm",
+		"-e", "CURSOR_API_KEY="+key,
+		"agent-debian:latest",
+		"agent", "-p", "Respond only with PONG to this ping.", "--trust", "--mode", "plan")
+
+	if got.exit != 0 {
+		t.Fatalf("cursor prompt exited %d:\n%s\n%s", got.exit, got.stdout, got.stderr)
+	}
+	if !strings.Contains(got.stdout, "PONG") {
+		t.Errorf("cursor output does not contain PONG:\n%s", got.stdout)
+	}
+}

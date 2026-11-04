@@ -14,7 +14,13 @@ func RunArgs(spec Spec) ([]string, error) {
 	for _, path := range spec.Tmpfs {
 		args = append(args, "--tmpfs", path)
 	}
-	args = append(args, "--network", spec.Network)
+	if len(spec.Networks) > 0 {
+		for _, net := range spec.Networks {
+			args = append(args, "--network", net)
+		}
+	} else if spec.Network != "" {
+		args = append(args, "--network", spec.Network)
+	}
 	if spec.Name != "" {
 		args = append(args, "--name", spec.Name)
 	}
@@ -23,6 +29,9 @@ func RunArgs(spec Spec) ([]string, error) {
 	}
 	if spec.Memory != "" {
 		args = append(args, "--memory", spec.Memory)
+	}
+	for _, key := range slices.Sorted(maps.Keys(spec.Env)) {
+		args = append(args, "--env", key+"="+spec.Env[key])
 	}
 	for _, m := range spec.Mounts {
 		args = append(args, "--mount", mountFlag(m))

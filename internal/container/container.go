@@ -19,6 +19,7 @@ var (
 	ErrBadMountPath   = errors.New("container mount path contains a comma or equals sign")
 	ErrBadLabel       = errors.New("container label key or value is empty or contains a comma or equals sign")
 	ErrBadName        = errors.New("container name contains a comma or equals sign")
+	ErrBadEnv         = errors.New("container environment variable key is empty or contains an equals sign")
 )
 
 type Mount struct {
@@ -34,9 +35,11 @@ type Spec struct {
 	Tmpfs    []string
 	Mounts   []Mount
 	Network  string
+	Networks []string
 	Name     string
 	Labels   map[string]string
 	Memory   string
+	Env      map[string]string
 	Cmd      []string
 }
 

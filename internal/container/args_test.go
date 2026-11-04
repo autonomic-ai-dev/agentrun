@@ -215,6 +215,48 @@ func TestRunArgs(t *testing.T) {
 			},
 			wantErr: container.ErrBadName,
 		},
+		{
+			name: "multiple networks emitted in order",
+			mutate: func(s *container.Spec) {
+				s.Network = ""
+				s.Networks = []string{"default", "agentrun-internal"}
+			},
+			want: []string{
+				"--user", "1000:1000",
+				"--read-only",
+				"--tmpfs", "/tmp",
+				"--network", "default",
+				"--network", "agentrun-internal",
+				"ghcr.io/example/agent:1.2.3",
+				"sh", "-c", "echo hi",
+			},
+		},
+		{
+			name: "env variables sorted by key",
+			mutate: func(s *container.Spec) {
+				s.Env = map[string]string{
+					"HTTPS_PROXY":    "http://192.168.128.2:3128",
+					"GEMINI_API_KEY": "secret-key",
+				}
+			},
+			want: []string{
+				"--user", "1000:1000",
+				"--read-only",
+				"--tmpfs", "/tmp",
+				"--network", "agentrun-internal",
+				"--env", "GEMINI_API_KEY=secret-key",
+				"--env", "HTTPS_PROXY=http://192.168.128.2:3128",
+				"ghcr.io/example/agent:1.2.3",
+				"sh", "-c", "echo hi",
+			},
+		},
+		{
+			name: "invalid env key with equals is rejected",
+			mutate: func(s *container.Spec) {
+				s.Env = map[string]string{"A=B": "val"}
+			},
+			wantErr: container.ErrBadEnv,
+		},
 	}
 
 	for _, tt := range tests {

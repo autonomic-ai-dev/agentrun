@@ -120,6 +120,33 @@ func TestSpecValidate(t *testing.T) {
 		{name: "command elements with spaces are allowed", mutate: func(s *container.Spec) {
 			s.Cmd = []string{"sh", "-c", "echo a b"}
 		}},
+		{name: "valid multi-network", mutate: func(s *container.Spec) {
+			s.Network = ""
+			s.Networks = []string{"net1", "net2"}
+		}},
+		{name: "empty networks slice and empty network", mutate: func(s *container.Spec) {
+			s.Network = ""
+			s.Networks = []string{}
+		}, wantErr: container.ErrNoNetwork},
+		{name: "empty network element in networks", mutate: func(s *container.Spec) {
+			s.Network = ""
+			s.Networks = []string{""}
+		}, wantErr: container.ErrNoNetwork},
+		{name: "network with comma", mutate: func(s *container.Spec) {
+			s.Networks = []string{"net,1"}
+		}, wantErr: container.ErrNoNetwork},
+		{name: "valid env", mutate: func(s *container.Spec) {
+			s.Env = map[string]string{"A": "B", "C": "D"}
+		}},
+		{name: "empty env key", mutate: func(s *container.Spec) {
+			s.Env = map[string]string{"": "val"}
+		}, wantErr: container.ErrBadEnv},
+		{name: "env key with equals", mutate: func(s *container.Spec) {
+			s.Env = map[string]string{"A=B": "val"}
+		}, wantErr: container.ErrBadEnv},
+		{name: "env with null byte", mutate: func(s *container.Spec) {
+			s.Env = map[string]string{"A": "v\x00al"}
+		}, wantErr: container.ErrBadEnv},
 		{name: "first violation wins", mutate: func(s *container.Spec) {
 			s.Image = ""
 			s.User = "root"

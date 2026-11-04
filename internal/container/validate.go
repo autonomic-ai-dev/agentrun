@@ -20,8 +20,21 @@ func (s Spec) Validate() error {
 	if !slices.Contains(s.Tmpfs, "/tmp") {
 		return fmt.Errorf("tmpfs %v has no /tmp: %w", s.Tmpfs, ErrMissingTmpfs)
 	}
-	if s.Network == "" {
+	if s.Network == "" && len(s.Networks) == 0 {
 		return fmt.Errorf("network is empty: %w", ErrNoNetwork)
+	}
+	for _, net := range s.Networks {
+		if net == "" {
+			return fmt.Errorf("network is empty: %w", ErrNoNetwork)
+		}
+		if strings.ContainsAny(net, ",=") {
+			return fmt.Errorf("network %q contains a comma or equals sign: %w", net, ErrNoNetwork)
+		}
+	}
+	for k, v := range s.Env {
+		if k == "" || strings.Contains(k, "=") || strings.Contains(k, "\x00") || strings.Contains(v, "\x00") {
+			return fmt.Errorf("env %q=%q is invalid: %w", k, v, ErrBadEnv)
+		}
 	}
 	for _, m := range s.Mounts {
 		if isGitDir(m.Host) || isGitDir(m.Guest) {
