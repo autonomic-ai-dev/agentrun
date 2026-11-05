@@ -76,13 +76,18 @@ func Execute(ctx context.Context, run *Run, opts ExecutionOptions) error {
 	agentFn := opts.Agent
 	containerOpts := opts.Container
 	if containerOpts != nil && containerOpts.Egress != nil {
-		sidecar, err := startEgress(ctx, run, *containerOpts.Egress)
+		eg := containerOpts.Egress.withDefaults()
+		sidecar, err := startEgress(ctx, run, eg)
 		if err != nil {
 			_ = SetStatus(run.Dir, StatusFailed)
 			return err
 		}
-		defer func() { _ = sidecar.Stop(context.Background()) }()
-		proxied := containerOpts.behindProxy(containerOpts.Egress.Network, sidecar.ProxyURL)
+		network := eg.runNetwork(run)
+		defer func() {
+			_ = sidecar.Stop(context.Background())
+			_ = eg.DeleteNetwork(context.Background(), network)
+		}()
+		proxied := containerOpts.behindProxy(network, sidecar.ProxyURL)
 		containerOpts = &proxied
 	}
 

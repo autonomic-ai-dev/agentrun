@@ -58,7 +58,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	agentCmd := fs.String("agent-cmd", "", "shell command that reads the prompt on stdin, run inside the agent container")
 	image := fs.String("image", "", "agent image reference with an explicit tag or digest")
 	egressImage := fs.String("egress-image", "", "egress sidecar image reference with an explicit tag")
-	network := fs.String("network", "agentrun-internal", "internal network the agent and sidecar share")
+	network := fs.String("network", "agentrun-internal", "prefix for each run's internal network, named <prefix>-<run id>")
 	memory := fs.String("memory", "", "memory limit for each container, e.g. 1G")
 	user := fs.String("user", "", "UID:GID for containers; defaults to the current user")
 	maxAttempts := fs.Int("max-attempts", 3, "attempts before the run is marked failed")

@@ -3,12 +3,15 @@
 package capability_test
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"agentrun/internal/egress"
 	"agentrun/internal/engine"
 	"agentrun/internal/verify"
 )
@@ -87,5 +90,88 @@ func TestEgressSidecarBlocksDirectAndUnlistedTraffic(t *testing.T) {
 	}
 	if strings.Contains(log, "DIRECT_OPEN") {
 		t.Errorf("agent reached the internet directly:\n%s", log)
+	}
+}
+
+func egressEngineOptions(image string) *engine.ContainerOptions {
+	options := appleEngineOptions()
+	options.Network = ""
+	options.Egress = &engine.EgressOptions{
+		Image:   image,
+		Network: "agentrun-internal",
+		Allow:   []string{"example.com:443"},
+	}
+	return options
+}
+
+func waitForSidecarAddress(t *testing.T, sidecar, network string) string {
+	t.Helper()
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		if out, err := exec.Command("container", "inspect", sidecar).Output(); err == nil {
+			if ip, err := egress.ExtractInternalIP(out, network); err == nil {
+				return ip
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("sidecar %s never got an address on %s", sidecar, network)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+func TestConcurrentRunsCannotReachEachOthersSidecar(t *testing.T) {
+	image := buildEgressImage(t)
+	repo := newRepoWithCommit(t)
+	dataDir := t.TempDir()
+
+	holder, err := engine.CreateRun(engine.SubmitConfig{Prompt: "hold the sidecar", Repo: repo, DataDir: dataDir})
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+	prober, err := engine.CreateRun(engine.SubmitConfig{Prompt: "probe the other run", Repo: repo, DataDir: dataDir})
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	holderDone := make(chan error, 1)
+	go func() {
+		holderDone <- engine.Execute(t.Context(), holder, engine.ExecutionOptions{
+			AgentCmd:    "sleep 30",
+			Checks:      []verify.Check{{Name: "true", Command: "true"}},
+			MaxAttempts: 1,
+			Container:   egressEngineOptions(image),
+		})
+	}()
+
+	holderSidecarIP := waitForSidecarAddress(t, "agentrun-egress-"+holder.ID, "agentrun-internal-"+holder.ID)
+	probeCmd := fmt.Sprintf("cat >/dev/null\nnc -z -w 3 %s 3128 && echo CROSS_RUN_OPEN || echo CROSS_RUN_BLOCKED\ntrue", holderSidecarIP)
+
+	err = engine.Execute(t.Context(), prober, engine.ExecutionOptions{
+		AgentCmd:    probeCmd,
+		Checks:      []verify.Check{{Name: "true", Command: "true"}},
+		MaxAttempts: 1,
+		Container:   egressEngineOptions(image),
+	})
+	if err != nil {
+		t.Fatalf("prober run failed: %v", err)
+	}
+	if err := <-holderDone; err != nil {
+		t.Fatalf("holder run failed: %v", err)
+	}
+
+	log := readFileOrEmpty(filepath.Join(prober.Dir, "logs", "agent.log"))
+	if !strings.Contains(log, "CROSS_RUN_BLOCKED") || strings.Contains(log, "CROSS_RUN_OPEN") {
+		t.Errorf("prober reached another run's sidecar at %s:\n%s", holderSidecarIP, log)
+	}
+
+	networks, err := exec.Command("container", "network", "list").Output()
+	if err != nil {
+		t.Fatalf("list networks: %v", err)
+	}
+	for _, run := range []*engine.Run{holder, prober} {
+		if strings.Contains(string(networks), "agentrun-internal-"+run.ID) {
+			t.Errorf("run network agentrun-internal-%s was not removed after the run", run.ID)
+		}
 	}
 }

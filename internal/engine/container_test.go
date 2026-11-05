@@ -6,12 +6,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
 	"agentrun/internal/container"
 	"agentrun/internal/container/containertest"
+	"agentrun/internal/egress"
 	"agentrun/internal/engine"
 	"agentrun/internal/verify"
 )
@@ -181,5 +183,173 @@ func TestExecuteInContainerRequiresBackend(t *testing.T) {
 	})
 	if !errors.Is(err, engine.ErrNoBackend) {
 		t.Errorf("Execute() error = %v, want ErrNoBackend", err)
+	}
+}
+
+func egressOptions(create func(context.Context, string) error, start func(context.Context, egress.SidecarConfig) (*egress.Sidecar, error)) *engine.EgressOptions {
+	return &engine.EgressOptions{
+		Image:         "agentrun-egress:test",
+		Network:       "agentrun-internal",
+		Allow:         []string{"example.com:443"},
+		CreateNetwork: create,
+		DeleteNetwork: func(context.Context, string) error { return nil },
+		StartSidecar:  start,
+	}
+}
+
+func TestExecuteEgressRunsContainersBehindSidecarProxyOnRunNetwork(t *testing.T) {
+	run, _ := createQueuedRun(t)
+	fake := &containertest.Fake{Results: []container.Result{{ExitCode: 0}, {ExitCode: 0}}}
+	var created string
+	var started egress.SidecarConfig
+	var deleted []string
+	const proxyURL = "http://192.168.129.2:3128"
+	wantNetwork := "agentrun-internal-" + run.ID
+
+	co := containerOptions(fake)
+	co.Egress = egressOptions(
+		func(_ context.Context, name string) error {
+			created = name
+			return nil
+		},
+		func(_ context.Context, cfg egress.SidecarConfig) (*egress.Sidecar, error) {
+			started = cfg
+			return &egress.Sidecar{Name: cfg.Name, ProxyURL: proxyURL}, nil
+		},
+	)
+	co.Egress.DeleteNetwork = func(_ context.Context, name string) error {
+		deleted = append(deleted, name)
+		return nil
+	}
+
+	err := engine.Execute(context.Background(), run, engine.ExecutionOptions{
+		AgentCmd:    "true",
+		Checks:      []verify.Check{{Name: "true", Command: "true"}},
+		MaxAttempts: 1,
+		Container:   co,
+	})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if created != wantNetwork {
+		t.Errorf("created network = %q, want %q", created, wantNetwork)
+	}
+	wantCfg := egress.SidecarConfig{
+		Name:            "agentrun-egress-" + run.ID,
+		Image:           "agentrun-egress:test",
+		Allow:           []string{"example.com:443"},
+		InternalNetwork: wantNetwork,
+	}
+	if !reflect.DeepEqual(started, wantCfg) {
+		t.Errorf("sidecar config = %+v, want %+v", started, wantCfg)
+	}
+	if len(fake.Specs) != 2 {
+		t.Fatalf("container ran %d times, want 2", len(fake.Specs))
+	}
+	for _, spec := range fake.Specs {
+		if !slices.Equal(spec.Networks, []string{wantNetwork}) {
+			t.Errorf("spec networks = %v, want only %s", spec.Networks, wantNetwork)
+		}
+		if spec.Env["HTTPS_PROXY"] != proxyURL {
+			t.Errorf("spec env = %v, want HTTPS_PROXY=%s", spec.Env, proxyURL)
+		}
+	}
+	if !slices.Equal(deleted, []string{wantNetwork}) {
+		t.Errorf("deleted networks = %v, want the run network %s after the run", deleted, wantNetwork)
+	}
+}
+
+func TestExecuteEgressFailsRunWithoutEgressNetwork(t *testing.T) {
+	run, _ := createQueuedRun(t)
+	fake := &containertest.Fake{}
+	co := containerOptions(fake)
+	co.Egress = &engine.EgressOptions{Image: "agentrun-egress:test"}
+
+	err := engine.Execute(context.Background(), run, engine.ExecutionOptions{
+		AgentCmd:  "true",
+		Checks:    []verify.Check{{Name: "true", Command: "true"}},
+		Container: co,
+	})
+	if !errors.Is(err, engine.ErrNoEgressNetwork) {
+		t.Fatalf("Execute() error = %v, want ErrNoEgressNetwork", err)
+	}
+	if len(fake.Specs) != 0 {
+		t.Errorf("container ran %d times without an egress network", len(fake.Specs))
+	}
+	assertStatus(t, run, engine.StatusFailed)
+}
+
+func TestExecuteEgressFailsRunWhenNetworkCannotBeEnsured(t *testing.T) {
+	run, _ := createQueuedRun(t)
+	fake := &containertest.Fake{}
+	networkErr := errors.New("network service is not running")
+	sidecarStarted := false
+	co := containerOptions(fake)
+	co.Egress = egressOptions(
+		func(context.Context, string) error { return networkErr },
+		func(context.Context, egress.SidecarConfig) (*egress.Sidecar, error) {
+			sidecarStarted = true
+			return nil, nil
+		},
+	)
+
+	err := engine.Execute(context.Background(), run, engine.ExecutionOptions{
+		AgentCmd:  "true",
+		Checks:    []verify.Check{{Name: "true", Command: "true"}},
+		Container: co,
+	})
+	if !errors.Is(err, networkErr) {
+		t.Fatalf("Execute() error = %v, want %v", err, networkErr)
+	}
+	if sidecarStarted {
+		t.Error("sidecar started although the network could not be ensured")
+	}
+	if len(fake.Specs) != 0 {
+		t.Errorf("container ran %d times without a network", len(fake.Specs))
+	}
+	assertStatus(t, run, engine.StatusFailed)
+}
+
+func TestExecuteEgressFailsRunWhenSidecarCannotStart(t *testing.T) {
+	run, _ := createQueuedRun(t)
+	fake := &containertest.Fake{}
+	sidecarErr := errors.New("sidecar image is missing")
+	var deleted []string
+	co := containerOptions(fake)
+	co.Egress = egressOptions(
+		func(context.Context, string) error { return nil },
+		func(context.Context, egress.SidecarConfig) (*egress.Sidecar, error) { return nil, sidecarErr },
+	)
+	co.Egress.DeleteNetwork = func(_ context.Context, name string) error {
+		deleted = append(deleted, name)
+		return nil
+	}
+
+	err := engine.Execute(context.Background(), run, engine.ExecutionOptions{
+		AgentCmd:  "true",
+		Checks:    []verify.Check{{Name: "true", Command: "true"}},
+		Container: co,
+	})
+	if !errors.Is(err, sidecarErr) {
+		t.Fatalf("Execute() error = %v, want %v", err, sidecarErr)
+	}
+	if len(fake.Specs) != 0 {
+		t.Errorf("container ran %d times without a sidecar", len(fake.Specs))
+	}
+	if want := []string{"agentrun-internal-" + run.ID}; !slices.Equal(deleted, want) {
+		t.Errorf("deleted networks = %v, want %v after the sidecar failed", deleted, want)
+	}
+	assertStatus(t, run, engine.StatusFailed)
+}
+
+func assertStatus(t *testing.T, run *engine.Run, want engine.Status) {
+	t.Helper()
+	status, err := engine.GetStatus(run.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != want {
+		t.Errorf("status = %q, want %q", status, want)
 	}
 }

@@ -42,10 +42,29 @@ type ContainerOptions struct {
 }
 
 type EgressOptions struct {
-	Image        string
-	Network      string
-	Allow        []string
-	StartSidecar func(ctx context.Context, cfg egress.SidecarConfig) (*egress.Sidecar, error)
+	Image         string
+	Network       string
+	Allow         []string
+	CreateNetwork func(ctx context.Context, name string) error
+	DeleteNetwork func(ctx context.Context, name string) error
+	StartSidecar  func(ctx context.Context, cfg egress.SidecarConfig) (*egress.Sidecar, error)
+}
+
+func (eg EgressOptions) withDefaults() EgressOptions {
+	if eg.CreateNetwork == nil {
+		eg.CreateNetwork = egress.CreateInternalNetwork
+	}
+	if eg.DeleteNetwork == nil {
+		eg.DeleteNetwork = egress.DeleteNetwork
+	}
+	if eg.StartSidecar == nil {
+		eg.StartSidecar = egress.StartSidecar
+	}
+	return eg
+}
+
+func (eg EgressOptions) runNetwork(run *Run) string {
+	return eg.Network + "-" + run.ID
 }
 
 func (co ContainerOptions) spec(run *Run, command string) container.Spec {
@@ -79,19 +98,21 @@ func startEgress(ctx context.Context, run *Run, eg EgressOptions) (*egress.Sidec
 	if eg.Network == "" {
 		return nil, ErrNoEgressNetwork
 	}
-	if err := egress.EnsureInternalNetwork(ctx, eg.Network); err != nil {
+	network := eg.runNetwork(run)
+	if err := eg.CreateNetwork(ctx, network); err != nil {
 		return nil, err
 	}
-	start := eg.StartSidecar
-	if start == nil {
-		start = egress.StartSidecar
-	}
-	return start(ctx, egress.SidecarConfig{
+	sidecar, err := eg.StartSidecar(ctx, egress.SidecarConfig{
 		Name:            "agentrun-egress-" + run.ID,
 		Image:           eg.Image,
 		Allow:           eg.Allow,
-		InternalNetwork: eg.Network,
+		InternalNetwork: network,
 	})
+	if err != nil {
+		_ = eg.DeleteNetwork(context.Background(), network)
+		return nil, err
+	}
+	return sidecar, nil
 }
 
 func runContainer(ctx context.Context, run *Run, co ContainerOptions, command string, output io.Writer) (container.Result, error) {

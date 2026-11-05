@@ -16,34 +16,45 @@ func TestExtractInternalIP(t *testing.T) {
 	tests := []struct {
 		name    string
 		json    string
+		network string
 		want    string
 		wantErr error
 	}{
 		{
-			name: "extracts from structured network view",
-			json: `[{"status":{"networks":[{"name":"default","ipAddress":"192.168.64.3"},{"name":"agentrun-internal","ipAddress":"192.168.128.5"}]}}]`,
-			want: "192.168.128.5",
+			name:    "extracts the address of the named network",
+			json:    `[{"status":{"networks":[{"network":"default","ipv4Address":"192.168.64.5/24"},{"network":"agentrun-internal-7f3a2b","ipv4Address":"192.168.129.2/24"}]}}]`,
+			network: "agentrun-internal-7f3a2b",
+			want:    "192.168.129.2",
 		},
 		{
-			name: "extracts from flat network format",
-			json: `{"NetworkSettings":{"Networks":{"agentrun-internal":{"IPAddress":"192.168.128.12"}}}}`,
-			want: "192.168.128.12",
+			name:    "ignores addresses on other networks",
+			json:    `[{"status":{"networks":[{"network":"agentrun-internal-7f3a2b","ipv4Address":"192.168.129.2/24"},{"network":"default","ipv4Address":"192.168.64.5/24"}]}}]`,
+			network: "default",
+			want:    "192.168.64.5",
 		},
 		{
 			name:    "fails on invalid json",
 			json:    `{not valid json`,
+			network: "default",
 			wantErr: errors.New("parse inspect JSON"),
 		},
 		{
-			name:    "fails when no 192.168.128.x ip is present",
-			json:    `[{"status":{"networks":[{"name":"default","ipAddress":"192.168.64.3"}]}}]`,
+			name:    "fails when the named network is not attached",
+			json:    `[{"status":{"networks":[{"network":"default","ipv4Address":"192.168.64.5/24"}]}}]`,
+			network: "agentrun-internal-7f3a2b",
+			wantErr: egress.ErrInternalIPNotFound,
+		},
+		{
+			name:    "fails when the attachment has no address",
+			json:    `[{"status":{"networks":[{"network":"agentrun-internal-7f3a2b","ipv4Address":""}]}}]`,
+			network: "agentrun-internal-7f3a2b",
 			wantErr: egress.ErrInternalIPNotFound,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := egress.ExtractInternalIP([]byte(tt.json))
+			got, err := egress.ExtractInternalIP([]byte(tt.json), tt.network)
 			if tt.wantErr != nil {
 				if err == nil {
 					t.Fatalf("expected error, got nil")
@@ -100,7 +111,7 @@ case "$1" in
     exit 0
     ;;
   inspect)
-    echo '[{"status":{"networks":[{"name":"agentrun-internal","ipAddress":"192.168.128.42"}]}}]'
+    echo '[{"status":{"networks":[{"network":"agentrun-internal","ipv4Address":"192.168.128.42/24"}]}}]'
     exit 0
     ;;
   stop|delete)

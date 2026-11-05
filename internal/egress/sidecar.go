@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -15,7 +14,7 @@ var (
 	ErrMissingSidecarName  = errors.New("sidecar container name is required")
 	ErrMissingSidecarImage = errors.New("sidecar image is required")
 	ErrEmptyAllowList      = errors.New("sidecar allow list cannot be empty")
-	ErrInternalIPNotFound  = errors.New("internal network IP address (192.168.128.x) not found")
+	ErrInternalIPNotFound  = errors.New("internal network IP address not found")
 	ErrSidecarStartTimeout = errors.New("timed out waiting for sidecar to start")
 )
 
@@ -36,18 +35,29 @@ type Sidecar struct {
 	binary     string
 }
 
-func ExtractInternalIP(inspectData []byte) (string, error) {
-	var raw any
-	if err := json.Unmarshal(inspectData, &raw); err != nil {
+type inspectEntry struct {
+	Status struct {
+		Networks []struct {
+			Network     string `json:"network"`
+			IPv4Address string `json:"ipv4Address"`
+		} `json:"networks"`
+	} `json:"status"`
+}
+
+func ExtractInternalIP(inspectData []byte, network string) (string, error) {
+	var entries []inspectEntry
+	if err := json.Unmarshal(inspectData, &entries); err != nil {
 		return "", fmt.Errorf("parse inspect JSON: %w", err)
 	}
-
-	re := regexp.MustCompile(`\b192\.168\.128\.([2-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])\b`)
-	loc := re.Find(inspectData)
-	if loc == nil {
-		return "", ErrInternalIPNotFound
+	for _, entry := range entries {
+		for _, attachment := range entry.Status.Networks {
+			addr, _, _ := strings.Cut(attachment.IPv4Address, "/")
+			if attachment.Network == network && addr != "" {
+				return addr, nil
+			}
+		}
 	}
-	return string(loc), nil
+	return "", ErrInternalIPNotFound
 }
 
 func StartSidecar(ctx context.Context, cfg SidecarConfig) (*Sidecar, error) {
@@ -105,7 +115,7 @@ func StartSidecar(ctx context.Context, cfg SidecarConfig) (*Sidecar, error) {
 		inspectCmd := exec.CommandContext(ctx, bin, "inspect", cfg.Name)
 		inspectOut, err := inspectCmd.Output()
 		if err == nil {
-			ip, ipErr := ExtractInternalIP(inspectOut)
+			ip, ipErr := ExtractInternalIP(inspectOut, intNet)
 			if ipErr == nil && ip != "" {
 				return &Sidecar{
 					Name:       cfg.Name,
