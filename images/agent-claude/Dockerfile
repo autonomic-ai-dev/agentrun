@@ -11,6 +11,9 @@ RUN apt-get update \
 RUN npm install -g @anthropic-ai/claude-code@2.1.299 \
  && claude --version
 
+RUN git config --system user.name agentrun \
+ && git config --system user.email agentrun@localhost
+
 ENV PATH=/usr/local/go/bin:$PATH
 ENV HOME=/tmp/agent-home
 ENV GOPATH=/tmp/go

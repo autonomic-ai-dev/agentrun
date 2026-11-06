@@ -32,7 +32,7 @@ The run engine stores each run as a directory under the data dir, executes its s
 - **Execute**: `engine.Execute(ctx, run, engine.ExecutionOptions{...})`
 - **Cancel / result**: `engine.Cancel(dataDir, id)`, `engine.GetResult(dataDir, id)`
 - **Agent command**: `agent.CommandFor(agent.AgentType, prompt)`
-- **Agent image**: `images/agent-claude/Dockerfile` (Node 22, Go 1.27.2, gcc for `-race` checks, `@anthropic-ai/claude-code` 2.1.299, with `claude --version` run at build time so a broken install fails the build); the same image runs the agent and the checks.
+- **Agent image**: `images/agent-claude/Dockerfile` (Node 22, Go 1.27.2, gcc for `-race` checks, `@anthropic-ai/claude-code` 2.1.299, with `claude --version` run at build time so a broken install fails the build, and a system git identity so checks that commit work without test-side env setup); the same image runs the agent and the checks.
 - **Credentials**: the CLI passes `agent.ProvisionCredentials(...)` into `ContainerOptions.Env`; the engine merges `HTTPS_PROXY` into a copy of it for each container.
 - **CLI**: `agentrun submit "<task>" ...`, `agentrun status|result|logs|cancel <id> [-data dir]` (`cmd/agentrun`, wraps the functions above)
 
