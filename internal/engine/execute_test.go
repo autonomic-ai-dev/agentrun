@@ -358,6 +358,8 @@ func TestExecuteFailsWhenCommitIsRejected(t *testing.T) {
 	}
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 
 	err = engine.Execute(context.Background(), run, engine.ExecutionOptions{
 		AgentCmd:    "echo done > note.txt",

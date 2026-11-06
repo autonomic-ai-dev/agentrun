@@ -6,6 +6,7 @@
 - Pipeline: `internal/engine/pipeline.go` (`Execute` runs `verify.Loop`, saves `outcome.json`, commits with hooks disabled, diffs against the base)
 - Cancel and result: `internal/engine/cancel.go`, `internal/engine/result.go`
 - CLI entry: `cmd/agentrun/main.go` (`submit` calls `engine.CreateRun` and `engine.Execute`; `status`, `result`, `logs`, `cancel` call `engine.GetRun`, `engine.GetResult`, `engine.Cancel`)
+- `TestExecuteFailsWhenCommitIsRejected` must stay hermetic about git config: the agent image sets a system git identity, so the test sets `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_NOSYSTEM=1`.
 - Credentials reach containers only through `ContainerOptions.Env` (`internal/engine/container.go`); `submit` fills it from `agent.ProvisionCredentials`. Before this, the agent ran with no credentials and reported "Not logged in".
 - Agent image: `images/agent-claude/Dockerfile` (Node 22 base, Go 1.27.2 with checksum, gcc so `go test -race` works in checks, `@anthropic-ai/claude-code` pinned to 2.1.299, checked with `claude --version` at build time because npm postinstall can leave a 500-byte stub that fails with "claude native binary not installed"; system git identity set so container-side commits work; build with `container build -t agentrun-claude:0.1.0 images/agent-claude`)
 - Agent adapter: `internal/agent/adapter.go` (`CommandFor` passes the prompt as an argument, never through a shell)
