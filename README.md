@@ -114,4 +114,4 @@ Limits:
 
 ## License
 
-Not yet chosen. The PRD lists the license as an open decision before public release.
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
