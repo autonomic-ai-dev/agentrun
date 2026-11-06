@@ -7,6 +7,6 @@
 - Cancel and result: `internal/engine/cancel.go`, `internal/engine/result.go`
 - CLI entry: `cmd/agentrun/main.go` (`submit` calls `engine.CreateRun` and `engine.Execute`; `status`, `result`, `logs`, `cancel` call `engine.GetRun`, `engine.GetResult`, `engine.Cancel`)
 - Credentials reach containers only through `ContainerOptions.Env` (`internal/engine/container.go`); `submit` fills it from `agent.ProvisionCredentials`. Before this, the agent ran with no credentials and reported "Not logged in".
-- Agent image: `images/agent-claude/Dockerfile` (Node 22 base, Go 1.27.2 with checksum, gcc so `go test -race` works in checks, `@anthropic-ai/claude-code` pinned to 2.1.299; build with `container build -t agentrun-claude:0.1.0 images/agent-claude`)
+- Agent image: `images/agent-claude/Dockerfile` (Node 22 base, Go 1.27.2 with checksum, gcc so `go test -race` works in checks, `@anthropic-ai/claude-code` pinned to 2.1.299, checked with `claude --version` at build time because npm postinstall can leave a 500-byte stub that fails with "claude native binary not installed"; build with `container build -t agentrun-claude:0.1.0 images/agent-claude`)
 - Agent adapter: `internal/agent/adapter.go` (`CommandFor` passes the prompt as an argument, never through a shell)
 - Engine is uncommitted work in progress; `README.md` still says the engine is not built

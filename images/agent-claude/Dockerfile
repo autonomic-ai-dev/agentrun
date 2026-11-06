@@ -8,7 +8,8 @@ RUN apt-get update \
  && tar -C /usr/local -xzf /tmp/go.tar.gz \
  && rm /tmp/go.tar.gz
 
-RUN npm install -g @anthropic-ai/claude-code@2.1.299
+RUN npm install -g @anthropic-ai/claude-code@2.1.299 \
+ && claude --version
 
 ENV PATH=/usr/local/go/bin:$PATH
 ENV HOME=/tmp/agent-home
