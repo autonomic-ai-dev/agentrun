@@ -97,11 +97,15 @@ func ProvisionCredentials(agent AgentType, getenv func(string) string, homeDir s
 		env["CURSOR_API_KEY"] = key
 
 	case TypeClaude:
-		key := getenv("ANTHROPIC_API_KEY")
-		if key == "" {
-			return nil, fmt.Errorf("%w: ANTHROPIC_API_KEY required for claude", ErrMissingCredentials)
+		if token := getenv("CLAUDE_CODE_OAUTH_TOKEN"); token != "" {
+			env["CLAUDE_CODE_OAUTH_TOKEN"] = token
+		} else {
+			key := getenv("ANTHROPIC_API_KEY")
+			if key == "" {
+				return nil, fmt.Errorf("%w: CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY required for claude", ErrMissingCredentials)
+			}
+			env["ANTHROPIC_API_KEY"] = key
 		}
-		env["ANTHROPIC_API_KEY"] = key
 
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrUnknownAgent, agent)

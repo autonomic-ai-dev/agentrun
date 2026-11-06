@@ -139,3 +139,62 @@ func TestProvisionCredentials(t *testing.T) {
 		t.Errorf("expected ErrMissingCredentials, got %v", err)
 	}
 }
+
+func TestProvisionClaudeCredentials(t *testing.T) {
+	tests := []struct {
+		name     string
+		env      map[string]string
+		wantKey  string
+		wantVal  string
+		wantErr  bool
+		wantNone string
+	}{
+		{
+			name:     "oauth token",
+			env:      map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "oauth-secret"},
+			wantKey:  "CLAUDE_CODE_OAUTH_TOKEN",
+			wantVal:  "oauth-secret",
+			wantNone: "ANTHROPIC_API_KEY",
+		},
+		{
+			name:     "api key",
+			env:      map[string]string{"ANTHROPIC_API_KEY": "api-secret"},
+			wantKey:  "ANTHROPIC_API_KEY",
+			wantVal:  "api-secret",
+			wantNone: "CLAUDE_CODE_OAUTH_TOKEN",
+		},
+		{
+			name:     "oauth token preferred over api key",
+			env:      map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "oauth-secret", "ANTHROPIC_API_KEY": "api-secret"},
+			wantKey:  "CLAUDE_CODE_OAUTH_TOKEN",
+			wantVal:  "oauth-secret",
+			wantNone: "ANTHROPIC_API_KEY",
+		},
+		{
+			name:    "neither set",
+			env:     map[string]string{},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			getenv := func(key string) string { return tt.env[key] }
+			env, err := agent.ProvisionCredentials(agent.TypeClaude, getenv, t.TempDir())
+			if tt.wantErr {
+				if !errors.Is(err, agent.ErrMissingCredentials) {
+					t.Fatalf("expected ErrMissingCredentials, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ProvisionCredentials(Claude) err = %v", err)
+			}
+			if env[tt.wantKey] != tt.wantVal {
+				t.Errorf("%s = %q, want %q", tt.wantKey, env[tt.wantKey], tt.wantVal)
+			}
+			if _, ok := env[tt.wantNone]; ok {
+				t.Errorf("%s was provisioned, want it absent", tt.wantNone)
+			}
+		})
+	}
+}
