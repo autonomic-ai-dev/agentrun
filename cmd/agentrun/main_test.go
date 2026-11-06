@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -245,4 +246,95 @@ func TestCheckListParsesNameAndCommand(t *testing.T) {
 			t.Errorf("Set(%q) accepted an invalid check", bad)
 		}
 	}
+}
+
+func fakeContainerOnPath(t *testing.T, agentExit int) {
+	t.Helper()
+	dir := t.TempDir()
+	state := filepath.Join(dir, "network")
+	script := "#!/bin/sh\n" +
+		"case \"$1\" in\n" +
+		"network) exit 0 ;;\n" +
+		"stop|delete) exit 0 ;;\n" +
+		"inspect) printf '[{\"status\":{\"networks\":[{\"network\":\"%s\",\"ipv4Address\":\"192.168.64.2/24\"}]}}]\\n' \"$(cat '" + state + "')\"; exit 0 ;;\n" +
+		"run)\n" +
+		"  if [ \"$2\" = \"-d\" ]; then\n" +
+		"    prev=\"\"\n" +
+		"    for a in \"$@\"; do\n" +
+		"      if [ \"$prev\" = \"--network\" ]; then net=\"$a\"; fi\n" +
+		"      prev=\"$a\"\n" +
+		"    done\n" +
+		"    printf '%s' \"$net\" > '" + state + "'\n" +
+		"    exit 0\n" +
+		"  fi\n" +
+		"  for a in \"$@\"; do\n" +
+		"    case \"$a\" in\n" +
+		"    'cat /agentrun/prompt.txt | '*) exit " + strconv.Itoa(agentExit) + " ;;\n" +
+		"    esac\n" +
+		"  done\n" +
+		"  exit 0 ;;\n" +
+		"esac\n" +
+		"exit 0\n"
+	if err := os.WriteFile(filepath.Join(dir, "container"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake container: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func submitWithFakeContainer(t *testing.T, agentExit int) (int, string, string) {
+	t.Helper()
+	fakeContainerOnPath(t, agentExit)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	repo := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "base"},
+	} {
+		if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	args := []string{
+		"submit", "--repo", repo, "--data", t.TempDir(),
+		"--agent", "claude", "--agent-cmd", "true",
+		"--image", "agent:1", "--egress-image", "egress:1",
+		"--user", "1000:1000", "--max-attempts", "1",
+		"--check", "unit=true",
+		"task",
+	}
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), args, &stdout, &stderr)
+	return code, stdout.String(), stderr.String()
+}
+
+func runIDFromOutput(t *testing.T, stdout, status string) string {
+	t.Helper()
+	for _, line := range strings.Split(stdout, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 3 && fields[0] == "run" && fields[2] == status {
+			return fields[1]
+		}
+	}
+	t.Fatalf("stdout = %q, want a line 'run <id> %s'", stdout, status)
+	return ""
+}
+
+func TestSubmitSucceededRunWithFakeContainer(t *testing.T) {
+	code, stdout, stderr := submitWithFakeContainer(t, 0)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0\nstdout = %q\nstderr = %q", code, stdout, stderr)
+	}
+	id := runIDFromOutput(t, stdout, "succeeded")
+	if !strings.Contains(stdout, "branch agentrun/"+id+"\n") {
+		t.Errorf("stdout = %q, want branch agentrun/%s", stdout, id)
+	}
+}
+
+func TestSubmitFailedRunWhenAgentContainerExitsNonzero(t *testing.T) {
+	code, stdout, stderr := submitWithFakeContainer(t, 1)
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1\nstdout = %q\nstderr = %q", code, stdout, stderr)
+	}
+	runIDFromOutput(t, stdout, "failed")
 }
