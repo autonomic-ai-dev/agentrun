@@ -114,6 +114,24 @@ func TestSubmitRequiresTaskAndContainerFlags(t *testing.T) {
 	}
 }
 
+func TestSubmitRequiresClaudeCredentialsBeforeCreatingARun(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	repo := t.TempDir()
+	dataDir := t.TempDir()
+	var stderr bytes.Buffer
+	args := []string{"submit", "--repo", repo, "--data", dataDir, "--agent", "claude", "--agent-cmd", "x", "--image", "i:1", "--egress-image", "e:1", "task"}
+	if code := run(context.Background(), args, &bytes.Buffer{}, &stderr); code != 2 {
+		t.Errorf("exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "required for claude") {
+		t.Errorf("stderr = %q, want the missing-credentials error", stderr.String())
+	}
+	if entries, _ := os.ReadDir(filepath.Join(dataDir, "runs")); len(entries) != 0 {
+		t.Errorf("a run directory was created without credentials: %d entries", len(entries))
+	}
+}
+
 func newRunForCLI(t *testing.T, dataDir string) string {
 	t.Helper()
 	repo := t.TempDir()

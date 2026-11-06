@@ -260,6 +260,46 @@ func TestExecuteEgressRunsContainersBehindSidecarProxyOnRunNetwork(t *testing.T)
 	}
 }
 
+func TestExecuteRunsContainersWithCredentialsAndProxy(t *testing.T) {
+	run, _ := createQueuedRun(t)
+	fake := &containertest.Fake{Results: []container.Result{{ExitCode: 0}, {ExitCode: 0}}}
+	const proxyURL = "http://192.168.129.2:3128"
+	credentials := map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "oauth-secret"}
+
+	co := containerOptions(fake)
+	co.Env = credentials
+	co.Egress = egressOptions(
+		func(_ context.Context, name string) error { return nil },
+		func(_ context.Context, cfg egress.SidecarConfig) (*egress.Sidecar, error) {
+			return &egress.Sidecar{Name: cfg.Name, ProxyURL: proxyURL}, nil
+		},
+	)
+	co.Egress.DeleteNetwork = func(_ context.Context, name string) error { return nil }
+
+	err := engine.Execute(context.Background(), run, engine.ExecutionOptions{
+		AgentCmd:    "true",
+		Checks:      []verify.Check{{Name: "true", Command: "true"}},
+		MaxAttempts: 1,
+		Container:   co,
+	})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if len(fake.Specs) != 2 {
+		t.Fatalf("container ran %d times, want 2", len(fake.Specs))
+	}
+	wantEnv := map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "oauth-secret", "HTTPS_PROXY": proxyURL}
+	for _, spec := range fake.Specs {
+		if !reflect.DeepEqual(spec.Env, wantEnv) {
+			t.Errorf("spec env = %v, want %v", spec.Env, wantEnv)
+		}
+	}
+	if !reflect.DeepEqual(credentials, map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "oauth-secret"}) {
+		t.Errorf("caller's credentials were modified: %v", credentials)
+	}
+}
+
 func TestExecuteEgressFailsRunWithoutEgressNetwork(t *testing.T) {
 	run, _ := createQueuedRun(t)
 	fake := &containertest.Fake{}

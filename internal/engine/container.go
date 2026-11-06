@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,9 +37,9 @@ type ContainerOptions struct {
 	Network    string
 	Memory     string
 	Egress     *EgressOptions
+	Env        map[string]string
 
 	networks []string
-	env      map[string]string
 }
 
 type EgressOptions struct {
@@ -79,7 +80,7 @@ func (co ContainerOptions) spec(run *Run, command string) container.Spec {
 		WorkDir:  "/work",
 		Remove:   true,
 		Labels:   map[string]string{"agentrun.run": run.ID},
-		Env:      co.env,
+		Env:      co.Env,
 		Mounts: []container.Mount{
 			{Host: run.Worktree, Guest: "/work"},
 			{Host: filepath.Join(run.Dir, "prompt"), Guest: "/agentrun", ReadOnly: true},
@@ -90,7 +91,10 @@ func (co ContainerOptions) spec(run *Run, command string) container.Spec {
 
 func (co ContainerOptions) behindProxy(network, proxyURL string) ContainerOptions {
 	co.networks = []string{network}
-	co.env = map[string]string{"HTTPS_PROXY": proxyURL}
+	env := make(map[string]string, len(co.Env)+1)
+	maps.Copy(env, co.Env)
+	env["HTTPS_PROXY"] = proxyURL
+	co.Env = env
 	return co
 }
 

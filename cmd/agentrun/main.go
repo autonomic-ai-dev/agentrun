@@ -182,6 +182,11 @@ func runSubmit(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		fmt.Fprintf(stderr, "%v: %q\n", errUnknownAgent, *agentName)
 		return 2
 	}
+	credentials, err := agent.ProvisionCredentials(agent.AgentType(*agentName), os.Getenv, "")
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
 	if *user == "" {
 		*user = fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
 	}
@@ -208,6 +213,7 @@ func runSubmit(ctx context.Context, args []string, stdout, stderr io.Writer) int
 			Image:  *image,
 			User:   *user,
 			Memory: *memory,
+			Env:    credentials,
 			Egress: &engine.EgressOptions{Image: *egressImage, Network: *network, Allow: allow},
 		},
 	})
