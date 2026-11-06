@@ -32,6 +32,7 @@ The run engine stores each run as a directory under the data dir, executes its s
 - **Execute**: `engine.Execute(ctx, run, engine.ExecutionOptions{...})`
 - **Cancel / result**: `engine.Cancel(dataDir, id)`, `engine.GetResult(dataDir, id)`
 - **Agent command**: `agent.CommandFor(agent.AgentType, prompt)`
+- **CLI**: `agentrun submit "<task>" ...`, `agentrun status|result|logs|cancel <id> [-data dir]` (`cmd/agentrun`, wraps the functions above)
 
 ---
 

@@ -16,7 +16,7 @@ AgentRun runs coding-agent tasks as isolated, recoverable jobs on your own machi
 - `agentrun submit`, which runs one task in the Lite configuration (`cmd/agentrun`);
 - an isolation capability suite that runs real containers against Apple's `container` CLI (`test/capability`).
 
-Full mode, a status or result command for the product binary, and parallel runs are not built.
+`agentrun` also has `status`, `result`, `logs`, and `cancel` for a run ID. Full mode and parallel runs are not built.
 
 ### Submitting a task
 

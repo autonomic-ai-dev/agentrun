@@ -19,10 +19,16 @@ import (
 	"agentrun/internal/verify"
 )
 
-const usage = `usage: agentrun submit [flags] "<task>"
+const usage = `usage: agentrun <command> [flags]
 
-Required flags: --agent, --agent-cmd, --image, --egress-image.
-Run "agentrun submit -h" for every flag.
+Commands:
+  submit "<task>"   start a run (required flags: --agent, --agent-cmd, --image, --egress-image)
+  status <id>       print a run's status
+  result <id>       print a run's branch, commit, and changed files
+  logs <id>         print the agent's log
+  cancel <id>       stop a run
+
+Run "agentrun <command> -h" for the flags of a command.
 `
 
 var errUnknownAgent = errors.New("unknown agent type")
@@ -49,15 +55,86 @@ func (c *checkList) Set(value string) error {
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help" || args[0] == "help") {
-		fmt.Fprint(stdout, usage)
-		return 0
-	}
-	if len(args) == 0 || args[0] != "submit" {
+	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 2
 	}
+	switch args[0] {
+	case "-h", "--help", "help":
+		fmt.Fprint(stdout, usage)
+		return 0
+	case "submit":
+		return runSubmit(ctx, args[1:], stdout, stderr)
+	case "status":
+		return runRunCommand("status", args[1:], stderr, func(dataDir, id string) error {
+			run, err := engine.GetRun(dataDir, id)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(stdout, "run %s %s\n", run.ID, run.Status)
+			return nil
+		})
+	case "result":
+		return runRunCommand("result", args[1:], stderr, func(dataDir, id string) error {
+			res, err := engine.GetResult(dataDir, id)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(stdout, "run %s %s\nbranch %s\ncommit %s\n", res.ID, res.Status, res.Branch, res.Commit)
+			for _, file := range res.ChangedFiles {
+				fmt.Fprintf(stdout, "changed %s\n", file)
+			}
+			return nil
+		})
+	case "logs":
+		return runRunCommand("logs", args[1:], stderr, func(dataDir, id string) error {
+			run, err := engine.GetRun(dataDir, id)
+			if err != nil {
+				return err
+			}
+			log, err := os.ReadFile(filepath.Join(run.Dir, "logs", "agent.log"))
+			if err != nil {
+				return err
+			}
+			_, err = stdout.Write(log)
+			return err
+		})
+	case "cancel":
+		return runRunCommand("cancel", args[1:], stderr, func(dataDir, id string) error {
+			if err := engine.Cancel(dataDir, id); err != nil {
+				return err
+			}
+			fmt.Fprintf(stdout, "run %s cancelled\n", id)
+			return nil
+		})
+	default:
+		fmt.Fprint(stderr, usage)
+		return 2
+	}
+}
 
+func runRunCommand(name string, args []string, stderr io.Writer, do func(dataDir, id string) error) int {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dataDir := fs.String("data", "", "data directory; defaults to AGENTRUN_DATA or ~/.local/share/agentrun")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintf(stderr, "usage: agentrun %s [-data dir] <run id>\n", name)
+		return 2
+	}
+	if err := do(*dataDir, fs.Arg(0)); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	return 0
+}
+
+func runSubmit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("submit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
@@ -77,7 +154,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	dataDir := fs.String("data", "", "data directory; defaults to AGENTRUN_DATA or ~/.local/share/agentrun")
 	var checks checkList
 	fs.Var(&checks, "check", "name=command run in a container after each attempt; repeatable")
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
