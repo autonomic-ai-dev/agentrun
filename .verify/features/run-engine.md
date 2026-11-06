@@ -46,6 +46,7 @@ The run engine stores each run as a directory under the data dir, executes its s
 
 - `internal/engine/`
 - `internal/agent/`
+- `cmd/agentrun/`
 
 ---
 

@@ -17,6 +17,53 @@ func TestRunWithoutSubmitPrintsUsage(t *testing.T) {
 	}
 }
 
+func TestHelpPrintsUsageAndExitsZero(t *testing.T) {
+	for _, args := range [][]string{{"-h"}, {"--help"}, {"help"}} {
+		var stdout bytes.Buffer
+		if code := run(context.Background(), args, &stdout, &bytes.Buffer{}); code != 0 {
+			t.Errorf("run(%v) exit code = %d, want 0", args, code)
+		}
+		if !strings.Contains(stdout.String(), "Required flags: --agent, --agent-cmd, --image, --egress-image.") {
+			t.Errorf("run(%v) stdout = %q, want the usage with required flags", args, stdout.String())
+		}
+	}
+}
+
+func TestSubmitHelpListsFlagsAndExitsZero(t *testing.T) {
+	var stderr bytes.Buffer
+	if code := run(context.Background(), []string{"submit", "-h"}, &bytes.Buffer{}, &stderr); code != 0 {
+		t.Errorf("exit code = %d, want 0", code)
+	}
+	for _, flagName := range []string{"-agent-cmd", "-egress-image", "-max-attempts", "-check"} {
+		if !strings.Contains(stderr.String(), flagName) {
+			t.Errorf("stderr does not list %s: %q", flagName, stderr.String())
+		}
+	}
+}
+
+func TestSubmitUnknownFlagExitsTwoWithUsage(t *testing.T) {
+	var stderr bytes.Buffer
+	if code := run(context.Background(), []string{"submit", "--bogus", "task"}, &bytes.Buffer{}, &stderr); code != 2 {
+		t.Errorf("exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "usage: agentrun submit") {
+		t.Errorf("stderr = %q, want the usage line", stderr.String())
+	}
+}
+
+func TestSubmitReportsMissingRequiredFlagDeterministically(t *testing.T) {
+	const want = "submit needs --agent\n"
+	for i := 0; i < 50; i++ {
+		var stderr bytes.Buffer
+		if code := run(context.Background(), []string{"submit", "task"}, &bytes.Buffer{}, &stderr); code != 2 {
+			t.Fatalf("exit code = %d, want 2", code)
+		}
+		if stderr.String() != want {
+			t.Fatalf("attempt %d: stderr = %q, want %q", i, stderr.String(), want)
+		}
+	}
+}
+
 func TestSubmitRequiresTaskAndContainerFlags(t *testing.T) {
 	tests := []struct {
 		name string

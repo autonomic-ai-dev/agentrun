@@ -19,7 +19,11 @@ import (
 	"agentrun/internal/verify"
 )
 
-const usage = "usage: agentrun submit [flags] \"<task>\"\n"
+const usage = `usage: agentrun submit [flags] "<task>"
+
+Required flags: --agent, --agent-cmd, --image, --egress-image.
+Run "agentrun submit -h" for every flag.
+`
 
 var errUnknownAgent = errors.New("unknown agent type")
 
@@ -45,6 +49,10 @@ func (c *checkList) Set(value string) error {
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help" || args[0] == "help") {
+		fmt.Fprint(stdout, usage)
+		return 0
+	}
 	if len(args) == 0 || args[0] != "submit" {
 		fmt.Fprint(stderr, usage)
 		return 2
@@ -52,6 +60,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 	fs := flag.NewFlagSet("submit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprint(stderr, usage)
+		fs.PrintDefaults()
+	}
 	repo := fs.String("repo", ".", "git repository to run against")
 	includeDirty := fs.Bool("include-dirty", false, "start from HEAD even when the repository has uncommitted changes")
 	agentName := fs.String("agent", "", "agent type: claude, agy, or cursor")
@@ -66,15 +78,24 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	var checks checkList
 	fs.Var(&checks, "check", "name=command run in a container after each attempt; repeatable")
 	if err := fs.Parse(args[1:]); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 2
 	}
 	if fs.NArg() != 1 {
 		fmt.Fprintln(stderr, "submit takes exactly one task argument")
 		return 2
 	}
-	for name, value := range map[string]string{"agent": *agentName, "agent-cmd": *agentCmd, "image": *image, "egress-image": *egressImage} {
-		if value == "" {
-			fmt.Fprintf(stderr, "submit needs --%s\n", name)
+	required := []struct{ name, value string }{
+		{"agent", *agentName},
+		{"agent-cmd", *agentCmd},
+		{"image", *image},
+		{"egress-image", *egressImage},
+	}
+	for _, r := range required {
+		if r.value == "" {
+			fmt.Fprintf(stderr, "submit needs --%s\n", r.name)
 			return 2
 		}
 	}
